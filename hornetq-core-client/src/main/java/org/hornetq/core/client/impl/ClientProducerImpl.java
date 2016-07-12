@@ -209,8 +209,12 @@ public class ClientProducerImpl implements ClientProducerInternal
       closed = true;
    }
 
-   private void doSend(final SimpleString address, final Message msg) throws HornetQException
+   private void doSend(SimpleString sendingAddress, final Message msg) throws HornetQException
    {
+      if (sendingAddress == null)
+      {
+         sendingAddress = this.address;
+      }
       session.startCall();
 
       try
@@ -234,33 +238,17 @@ public class ClientProducerImpl implements ClientProducerInternal
             isLarge = false;
          }
 
-         if (address != null)
+         if (!isLarge)
          {
-            if (!isLarge)
-            {
-               session.setAddress(msg, address);
-            }
-            else
-            {
-               msg.setAddress(address);
-            }
-
-            // Anonymous
-            theCredits = session.getCredits(address, true);
+            session.setAddress(msg, sendingAddress);
          }
          else
          {
-            if (!isLarge)
-            {
-               session.setAddress(msg, this.address);
-            }
-            else
-            {
-               msg.setAddress(this.address);
-            }
-
-            theCredits = credits;
+            msg.setAddress(sendingAddress);
          }
+
+         // Anonymous
+         theCredits = session.getCredits(sendingAddress, true);
 
          if (rateLimiter != null)
          {
@@ -284,7 +272,7 @@ public class ClientProducerImpl implements ClientProducerInternal
          }
          else
          {
-            sendRegularMessage(msgI, sendBlocking, theCredits);
+            sendRegularMessage(sendingAddress, msgI, sendBlocking, theCredits);
          }
       }
       finally
@@ -293,7 +281,7 @@ public class ClientProducerImpl implements ClientProducerInternal
       }
    }
 
-   private void sendRegularMessage(MessageInternal msgI, boolean sendBlocking, final ClientProducerCredits theCredits) throws HornetQException
+   private void sendRegularMessage(final SimpleString sendingAddress, MessageInternal msgI, boolean sendBlocking, final ClientProducerCredits theCredits) throws HornetQException
    {
       try
       {
@@ -309,6 +297,8 @@ public class ClientProducerImpl implements ClientProducerInternal
       {
          throw new HornetQInterruptedException(e);
       }
+
+      session.checkDefaultAddress(sendingAddress);
 
       SessionSendMessage packet = new SessionSendMessage(msgI, sendBlocking);
 
@@ -557,7 +547,7 @@ public class ClientProducerImpl implements ClientProducerInternal
                msgI.putLongProperty(Message.HDR_LARGE_BODY_SIZE, deflaterReader.getTotalSize());
 
                msgI.getBodyBuffer().writeBytes(buff, 0, pos);
-               sendRegularMessage(msgI, sendBlocking, credits);
+               sendRegularMessage(msgI.getAddress(), msgI, sendBlocking, credits);
                return;
             }
 

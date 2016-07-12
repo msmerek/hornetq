@@ -29,6 +29,8 @@ import org.hornetq.api.core.client.ClientConsumer;
 import org.hornetq.api.core.client.ClientMessage;
 import org.hornetq.api.core.client.MessageHandler;
 import org.hornetq.api.jms.HornetQJMSConstants;
+import org.hornetq.core.client.HornetQClientLogger;
+import org.hornetq.core.client.impl.ClientSessionInternal;
 
 /**
  * HornetQ implementation of a JMS MessageConsumer.
@@ -229,7 +231,21 @@ public final class HornetQMessageConsumer implements QueueReceiver, TopicSubscri
                                                 ackMode == HornetQJMSConstants.INDIVIDUAL_ACKNOWLEDGE) ?
                                                                 session.getCoreSession() : null);
 
-            msg.doBeforeReceive();
+            try
+            {
+               msg.doBeforeReceive();
+            }
+            catch (IndexOutOfBoundsException ioob)
+            {
+               ((ClientSessionInternal)session.getCoreSession()).markRollbackOnly();
+               // In case this exception happen you will need to know where it happened.
+               // it has been a bug here in the past, and this was used to debug it.
+               // nothing better than keep it for future investigations in case it happened again
+               IndexOutOfBoundsException newIOOB = new IndexOutOfBoundsException(ioob.getMessage() + "@" + msg.getCoreMessage());
+               newIOOB.initCause(ioob);
+               HornetQClientLogger.LOGGER.warn(newIOOB.getMessage(), newIOOB);
+               throw ioob;
+            }
 
             // We Do the ack after doBeforeRecive, as in the case of large messages, this may fail so we don't want messages redelivered
             // https://issues.jboss.org/browse/JBPAPP-6110
@@ -247,6 +263,7 @@ public final class HornetQMessageConsumer implements QueueReceiver, TopicSubscri
       }
       catch (HornetQException e)
       {
+         ((ClientSessionInternal)session.getCoreSession()).markRollbackOnly();
          throw JMSExceptionHelper.convertFromHornetQException(e);
       }
    }

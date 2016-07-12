@@ -93,6 +93,7 @@ import org.hornetq.utils.SimpleIDGenerator;
 import org.hornetq.utils.TokenBucketLimiterImpl;
 import org.hornetq.utils.UUIDGenerator;
 import org.hornetq.utils.XidCodecSupport;
+import org.jboss.logging.Logger;
 
 /**
  * @author <a href="mailto:tim.fox@jboss.com">Tim Fox</a>
@@ -103,6 +104,7 @@ import org.hornetq.utils.XidCodecSupport;
  */
 final class ClientSessionImpl implements ClientSessionInternal, FailureListener, CommandConfirmationHandler
 {
+   private static final Logger logger = Logger.getLogger(ClientSessionImpl.class);
    private final Map<String, String> metadata = new HashMap<String, String>();
 
    private final ClientSessionFactoryInternal sessionFactory;
@@ -1270,23 +1272,31 @@ final class ClientSessionImpl implements ClientSessionInternal, FailureListener,
    {
       if (defaultAddress == null)
       {
-         defaultAddress = address;
+         logger.tracef("setAddress() Setting default address as %s", address);
 
-         if (message != null)
-         {
-            message.setAddress(address);
-         }
+         message.setAddress(address);
       }
-      else if (message != null)
+      else
       {
          if (!address.equals(defaultAddress))
          {
+            logger.tracef("setAddress() setting non default address %s on message", address);
             message.setAddress(address);
          }
          else
          {
+            logger.trace("setAddress() being set as null");
             message.setAddress(null);
          }
+      }
+   }
+
+   public void checkDefaultAddress(SimpleString address)
+   {
+      if (defaultAddress == null)
+      {
+         logger.tracef("checkDefaultAddress(%s)", address);
+         defaultAddress = address;
       }
    }
 
@@ -1326,7 +1336,6 @@ final class ClientSessionImpl implements ClientSessionInternal, FailureListener,
 
    public synchronized ClientProducerCredits getCredits(final SimpleString address, final boolean anon)
    {
-      setAddress(null, address);
       return producerCreditManager.getCredits(address, anon);
    }
 

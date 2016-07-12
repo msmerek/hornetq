@@ -114,6 +114,7 @@ import org.hornetq.utils.ExecutorFactory;
 import org.hornetq.utils.HornetQThreadFactory;
 import org.hornetq.utils.UUID;
 import org.hornetq.utils.XidCodecSupport;
+import org.jboss.logging.Logger;
 
 import static org.hornetq.core.persistence.impl.journal.JournalRecordIds.ACKNOWLEDGE_CURSOR;
 import static org.hornetq.core.persistence.impl.journal.JournalRecordIds.ADD_LARGE_MESSAGE;
@@ -142,6 +143,9 @@ import static org.hornetq.core.persistence.impl.journal.JournalRecordIds.SET_SCH
  */
 public class JournalStorageManager implements StorageManager
 {
+
+   private static final Logger logger = Logger.getLogger(JournalStorageManager.class);
+
    private static final long CHECKPOINT_BATCH_SIZE = Integer.MAX_VALUE;
 
    private final Semaphore pageMaxConcurrentIO;
@@ -441,14 +445,16 @@ public class JournalStorageManager implements StorageManager
             }
             bindingsJournal = new ReplicatedJournal(((byte) 0), originalBindingsJournal, replicator);
             messageJournal = new ReplicatedJournal((byte) 1, originalMessageJournal, replicator);
+
+            // We need to send the list while locking otherwise part of the body might get sent too soon
+            // it will send a list of IDs that we are allocating
+            replicator.sendLargeMessageIdListMessage(pendingLargeMessages);
          }
          finally
          {
             storageManagerLock.writeLock().unlock();
          }
 
-         // it will send a list of IDs that we are allocating
-         replicator.sendLargeMessageIdListMessage(pendingLargeMessages);
          sendJournalFile(messageFiles, JournalContent.MESSAGES);
          sendJournalFile(bindingsFiles, JournalContent.BINDINGS);
          sendLargeMessageFiles(pendingLargeMessages);
@@ -470,6 +476,7 @@ public class JournalStorageManager implements StorageManager
       }
       catch (Exception e)
       {
+         logger.warn(e.getMessage(), e);
          stopReplication();
          throw e;
       }
@@ -512,6 +519,7 @@ public class JournalStorageManager implements StorageManager
    @Override
    public void stopReplication()
    {
+      logger.trace("stopReplication()");
       storageManagerLock.writeLock().lock();
       try
       {
@@ -786,6 +794,11 @@ public class JournalStorageManager implements StorageManager
       getContext().executeOnCompletion(run);
    }
 
+   public void afterStoreOperations(final IOAsyncTask run)
+   {
+      getContext().executeOnCompletion(run, true);
+   }
+
    public long generateUniqueID()
    {
       return idGenerator.generateID();
@@ -837,6 +850,10 @@ public class JournalStorageManager implements StorageManager
          largeMessage.copyHeadersAndProperties(message);
 
          largeMessage.setMessageID(id);
+
+         // We do this here to avoid a case where the replication gets a list without this file
+         // to avoid a race
+         largeMessage.validateFile();
 
          if (largeMessage.isDurable())
          {
@@ -2962,6 +2979,12 @@ public class JournalStorageManager implements StorageManager
          // There are no executeOnCompletion calls while using the DummyOperationContext
          // However we keep the code here for correctness
          runnable.done();
+      }
+
+      @Override
+      public void executeOnCompletion(final IOAsyncTask runnable, boolean storeOnly)
+      {
+         executeOnCompletion(runnable);
       }
 
       public void replicationDone()
